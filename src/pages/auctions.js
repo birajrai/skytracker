@@ -65,6 +65,7 @@ const AuctionsPage = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
+    const [playerData, setPlayerData] = useState({}); // State to store player data
 
     // Function to fetch auction data
     const fetchAuctions = async () => {
@@ -83,10 +84,50 @@ const AuctionsPage = () => {
         }
     };
 
-    // Fetch auctions on component mount
+    // Function to fetch player name and avatar by UUID from the PlayerDB API
+    const fetchPlayerData = async (uuid) => {
+        try {
+            const response = await fetch(`https://playerdb.co/api/player/minecraft/${uuid}`);
+            const data = await response.json();
+            if (data.code === "player.found") {
+                return {
+                    username: data.data.player.username,
+                    avatar: data.data.player.avatar
+                };
+            }
+            return { username: uuid, avatar: '' }; // Fallback to UUID if not found
+        } catch {
+            return { username: uuid, avatar: '' }; // Fallback to UUID if there's an error
+        }
+    };
+
+    // Function to fetch all player data from UUIDs
+    const fetchPlayerDataFromUUIDs = async (uuids) => {
+        const dataPromises = uuids.map(uuid => fetchPlayerData(uuid));
+        const data = await Promise.all(dataPromises);
+        const dataMapping = {};
+        uuids.forEach((uuid, index) => {
+            dataMapping[uuid] = data[index];
+        });
+        setPlayerData(prev => ({ ...prev, ...dataMapping }));
+    };
+
+    // Fetch auctions and player names on component mount
     useEffect(() => {
         fetchAuctions();
     }, []);
+
+    // Fetch player data after auctions are loaded
+    useEffect(() => {
+        if (auctions.length > 0) {
+            const uniqueUuids = new Set();
+            uniqueUuids.add(auctions[0].auctioneer); // Add auctioneer UUID
+            auctions.forEach(auction => {
+                auction.coop.forEach(uuid => uniqueUuids.add(uuid)); // Add coop UUIDs
+            });
+            fetchPlayerDataFromUUIDs(Array.from(uniqueUuids)); // Fetch names for all unique UUIDs
+        }
+    }, [auctions]);
 
     // Filter items based on search term
     const filteredAuctions = auctions.filter(auction =>
@@ -134,10 +175,12 @@ const AuctionsPage = () => {
                 {currentAuctions.map((auction) => {
                     // Generate item image URL
                     const itemImageUrl = `https://static.hypixel.net/skyblock/items/${auction.item_uuid}.png`;
-                    // Generate auctioneer's head image URL
-                    const auctioneerHeadUrl = `https://minotar.net/helm/${auction.auctioneer}`;
                     // Get rarity color class
                     const rarityColor = getRarityColor(auction.tier);
+
+                    // Get player data
+                    const auctioneerData = playerData[auction.auctioneer] || { username: auction.auctioneer, avatar: '' };
+                    const coopData = auction.coop.map(uuid => playerData[uuid] || { username: uuid, avatar: '' });
 
                     return (
                         <li key={auction.uuid} className="flex p-4 border-b border-gray-200 items-start">
@@ -149,11 +192,13 @@ const AuctionsPage = () => {
                             />
                             <div className="flex-grow">
                                 <div className="flex items-center mb-2">
-                                    <img
-                                        src={auctioneerHeadUrl}
-                                        alt={auction.auctioneer}
-                                        className="w-10 h-10 rounded-full mr-2"
-                                    />
+                                    {auctioneerData.avatar && (
+                                        <img
+                                            src={auctioneerData.avatar}
+                                            alt={auctioneerData.username}
+                                            className="w-10 h-10 rounded-full mr-2"
+                                        />
+                                    )}
                                     <p className={`font-semibold text-lg ${rarityColor}`}>{auction.item_name}</p>
                                 </div>
                                 <div className="text-sm text-gray-500">
@@ -161,43 +206,24 @@ const AuctionsPage = () => {
                                 </div>
                                 <p className="text-sm text-gray-400 italic">{auction.extra}</p>
                                 <p className="text-gray-700">Price: {formatCoins(auction.starting_bid)} coins</p>
-                                <p className="text-gray-700">Seller: {auction.auctioneer}</p>
+                                <p className="text-gray-700">Seller: {auctioneerData.username}</p>
                                 {auction.claimed && (
                                     <p className="text-red-500">This auction has been claimed.</p>
                                 )}
                                 {auction.claimed_bidders.length > 0 && (
-                                    <p className="text-gray-500">
-                                        Claimed by: {auction.claimed_bidders.join(', ')}
-                                    </p>
+                                    <p className="text-gray-500">Claimed by: {auction.claimed_bidders.join(', ')}</p>
                                 )}
-                                <p className="text-gray-500">
-                                    Ending: {new Date(auction.end).toLocaleString()}
-                                </p>
-                                <p className="text-gray-500">Profile ID: {auction.profile_id}</p>
-                                <p className="text-gray-500">Category: {auction.category}</p>
-                                <p className="text-gray-500">Tier: {auction.tier}</p>
-                                <p className="text-gray-500">Highest Bid: {formatCoins(auction.highest_bid_amount)} coins</p>
-                                <p className="text-gray-500">Coop: {auction.coop.join(', ')}</p>
+                                {coopData.length > 0 && (
+                                    <p className="text-gray-500">Coop Members: {coopData.map(data => data.username).join(', ')}</p>
+                                )}
                             </div>
                         </li>
                     );
                 })}
             </ul>
             <div className="flex justify-between mt-4">
-                <button
-                    onClick={handlePreviousPage}
-                    className={`px-4 py-2 border rounded ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'bg-blue-500 text-white'}`}
-                    disabled={currentPage === 1}
-                >
-                    Previous
-                </button>
-                <button
-                    onClick={handleNextPage}
-                    className={`px-4 py-2 border rounded ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : 'bg-blue-500 text-white'}`}
-                    disabled={currentPage === totalPages}
-                >
-                    Next
-                </button>
+                <button onClick={handlePreviousPage} disabled={currentPage === 1} className="bg-blue-500 text-white px-4 py-2 rounded disabled:opacity-50">Previous</button>
+                <button onClick={handleNextPage} disabled={currentPage === totalPages} className="bg-blue-500 text-white px-4 py-2 rounded disabled:opacity-50">Next</button>
             </div>
         </div>
     );
